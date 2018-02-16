@@ -45,6 +45,7 @@
 
 	<div id="container"></div>
 	<div id="info">
+		<label for="fileopener">Open map...</label> <input type="file" id="fileopener" onchange="loadMap()" />
 		<div id="notSupported" style="display:none">Sorry your graphics card + browser does not support hardware instancing</div>
 	</div>
 
@@ -164,7 +165,6 @@
 	</script>
 
 	<script>
-
 		if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
 
 		var container, stats;
@@ -172,14 +172,6 @@
 		var offsetAttribute, occupancyAttribute;
 
 		var lastTime = 0;
-
-		var moveQ = new THREE.Quaternion( 0.5, 0.5, 0.5, 0.0 ).normalize();
-		var tmpQ = new THREE.Quaternion();
-		var currentQ = new THREE.Quaternion();
-
-		var oReq = new XMLHttpRequest();
-		oReq.open("GET", "/BeliefMap.bin", true);
-		oReq.responseType = "arraybuffer";
 
 		var occupancies = [];
 		var offsets = [];
@@ -191,55 +183,50 @@
 		var zMin;
 		var zMax;
 
-		oReq.onload = function (oEvent) {
-		  var arrayBuffer = oReq.response; // Note: not oReq.responseText
-		  if (arrayBuffer) {
-		  	console.log(arrayBuffer);
-		    var view = new DataView(arrayBuffer);
-		    // for (var i = 0; i < 100; ++i)
-		    // {
-		    // 	// console.log(view.getFloat64(i));
-		    // 	var s = String(view.getFloat64(i, true));
-		    // 	// console.log(s);
-		    // 	if (s.includes("125"))
-		    // 		console.log("Candidate:", s, i);
-		    // }
-		    voxelSize = view.getFloat64(0, true);
-		    xMin = view.getFloat64(8, true);
-		    xMax = view.getFloat64(16, true);
-		    yMin = view.getFloat64(24, true);
-		    yMax = view.getFloat64(32, true);
-		    zMin = view.getFloat64(40, true);
-		    zMax = view.getFloat64(48, true);
-		    var numParticles = view.getUint32(56, true);
-		    console.log(voxelSize, xMin, xMax, yMin, yMax, zMin, zMax, numParticles);
-		    var voxelsX = Math.floor((xMax-xMin)/voxelSize);
-		    var voxelsY = Math.floor((yMax-yMin)/voxelSize);
-		    var voxelsZ = Math.floor((zMax-zMin)/voxelSize);
-		    var ptr = 60;
-		    for (var x = 0; x < voxelsX; ++x)
-		    {
-		    	for (var y = 0; y < voxelsY; ++y)
+		function loadMap() {
+			var reader  = new FileReader();
+			reader.addEventListener("load", function (e) {
+				arrayBuffer = reader.result;
+				var view = new DataView(arrayBuffer);
+			    voxelSize = view.getFloat64(0, true);
+			    xMin = view.getFloat64(8, true);
+			    xMax = view.getFloat64(16, true);
+			    yMin = view.getFloat64(24, true);
+			    yMax = view.getFloat64(32, true);
+			    zMin = view.getFloat64(40, true);
+			    zMax = view.getFloat64(48, true);
+			    var numParticles = view.getUint32(56, true);
+			    console.log(voxelSize, xMin, xMax, yMin, yMax, zMin, zMax, numParticles);
+			    var voxelsX = Math.floor((xMax-xMin)/voxelSize);
+			    var voxelsY = Math.floor((yMax-yMin)/voxelSize);
+			    var voxelsZ = Math.floor((zMax-zMin)/voxelSize);
+			    var ptr = 60;
+			    for (var x = 0; x < voxelsX; ++x)
 			    {
-			    	for (var z = 0; z < voxelsZ; ++z)
+			    	for (var y = 0; y < voxelsY; ++y)
 				    {
-				    	var occupancy = view.getFloat64(ptr, true);
-				    	ptr += 8 * numParticles + 8;
+				    	for (var z = 0; z < voxelsZ; ++z)
+					    {
+					    	var occupancy = view.getFloat64(ptr, true);
+					    	ptr += 8 * numParticles + 8;
 
-				    	if (occupancy > 0.5)
-				    	{
-					    	occupancies.push(occupancy);
-					    	offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);
+					    	if (occupancy > 0.5)
+					    	{
+						    	occupancies.push(occupancy);
+						    	offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);
+						    }
 					    }
 				    }
 			    }
-		    }
-			init();
-			animate();
-		  }
-		};
+			    var element = document.getElementById("info");
+				element.outerHTML = "";
+				delete element;
+				init();
+				animate();
 
-		oReq.send(null);
+			}, false);
+			reader.readAsArrayBuffer(document.getElementById("fileopener").files[0]);
+		}
 
 		var clock;
 		function init() {
@@ -423,8 +410,6 @@
 
 		}
 
-		//
-
 		function animate() {
             var delta = clock.getDelta();
             controls.update(delta);
@@ -437,36 +422,12 @@
 		}
 
 		function render() {
-
 			var time = performance.now();
 
-
-			// mesh.rotation.y = time * 0.00005;
-
-			// var delta = ( time - lastTime ) / 5000;
-			// tmpQ.set( moveQ.x * delta, moveQ.y * delta, moveQ.z * delta, 1 ).normalize();
-			// tmpQ.set(controls.target.x, controls.target.y, controls.target.x);
-
-			// for ( var i = 0, il = orientationAttribute.count; i < il; i ++ ) {
-
-			// 	currentQ.fromArray( orientationAttribute.array, ( i * 4 ) );
-			// 	currentQ.multiply( tmpQ );
-
-			// 	orientationAttribute.setXYZW( i, currentQ.x, currentQ.y, currentQ.z, currentQ.w );
-
-			// }
-
-			// orientationAttribute.needsUpdate = true;
 			lastTime = time;
 
 			renderer.render( scene, camera );
-
 		}
-
 	</script>
-
 </body>
-
-
-
 </html>
