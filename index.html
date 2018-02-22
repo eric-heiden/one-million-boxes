@@ -260,6 +260,8 @@
 						{
 							var occupancy = view.getFloat64(ptr, true);
 							ptr += 8;
+							var variance = view.getFloat64(ptr, true);
+							ptr += 8;
 							if (readParticles == 1)
 								ptr += 8 * numParticles
 
