@@ -99,7 +99,10 @@
 		attribute vec3 normal;
 		attribute vec2 uv;
 		attribute vec4 orientation;
+
 		attribute float occupancy;
+		attribute float variance;
+		attribute float error;
 
 		varying vec2 vUv;
 
@@ -108,9 +111,10 @@
 		varying vec3 lightPos;
 
 		varying float occ;
+		varying float var;
+		varying float err;
 
 		void main() {
-
 			vec3 vPosition = position;
 			vec3 mPosition = offset + position;
 			// vec3 vcV = cross( orientation.xyz, vPosition );
@@ -123,7 +127,7 @@
 			if (occupancy < threshold
 				|| offset.x < xMin || offset.x > xMax
 				|| offset.y < zMin || offset.y > zMax
-				|| offset.z < yMin || offset.z > yMax)
+				|| offset.z < yMin || offset.z >= yMax)
 				gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
 			else
 			{
@@ -133,7 +137,10 @@
 			vec4 vertPos4 = modelViewMatrix * vec4(mPosition.xzy, 1.0);
 			vertPos = vec3(vertPos4) / vertPos4.w;
 			normalInterp = vec3(normalMatrix * vec4(normal.xzy, 0.0));
+
 			occ = occupancy;
+			var = variance;
+			err = error;
 		}
 	</script>
 
@@ -148,21 +155,61 @@
 		varying vec3 vertPos;
 
 		varying float occ;
+		varying float var;
+		varying float err;
 
 		varying vec3 lightPos;
 
+		uniform bool highlightErrors;
 		uniform int mode;
 
 		// const vec3 ambientColor = vec3(0.3, 0.0, 0.0);
 		// const vec3 specColor = vec3(1.0, 1.0, 1.0);
 
+		// the following colormap function is from https://github.com/kbinani/glsl-colormap
+		float colormap_red(float x) {
+		    if (x < 0.7) {
+		        return 4.0 * x - 1.5;
+		    } else {
+		        return -4.0 * x + 4.5;
+		    }
+		}
+
+		float colormap_green(float x) {
+		    if (x < 0.5) {
+		        return 4.0 * x - 0.5;
+		    } else {
+		        return -4.0 * x + 3.5;
+		    }
+		}
+
+		float colormap_blue(float x) {
+		    if (x < 0.3) {
+		       return 4.0 * x + 0.5;
+		    } else {
+		       return -4.0 * x + 2.5;
+		    }
+		}
+
+		vec4 jet(float x) {
+		    float r = clamp(colormap_red(x), 0.0, 1.0);
+		    float g = clamp(colormap_green(x), 0.0, 1.0);
+		    float b = clamp(colormap_blue(x), 0.0, 1.0);
+		    return vec4(r, g, b, 1.0);
+		}
+
 		void main() {
-
-			gl_FragColor = vec4(0.2, 0.5, 0.8, 0.5);
-
 			vec3 diffuseColor = vec3(1.-occ, 1.-occ, 1.-occ);
-			vec3 ambientColor = diffuseColor * 0.2;
-			vec3 specColor = diffuseColor * 1.6;
+			if (mode == 1)
+				diffuseColor = jet(var * 2.).xyz;
+			else if (mode == 2)
+				diffuseColor = jet(clamp(abs(err) - 2.*var, 0.0, 1.0)).xyz;				
+
+			if (highlightErrors && err > 0.5)
+				diffuseColor.x += err;
+
+			vec3 ambientColor = diffuseColor * 0.8;
+			vec3 specColor = diffuseColor * 1.2;
 
 			vec3 normal = normalize(normalInterp);
 			vec3 lightDir = normalize(lightPos - vertPos);
@@ -179,14 +226,6 @@
 			gl_FragColor = vec4(ambientColor +
 				lambertian*diffuseColor +
 				specular*specColor, 1.0);
-
-		    // only ambient
-		    if(mode == 2) gl_FragColor = vec4(ambientColor, 1.0);
-		    // only diffuse
-		    if(mode == 3) gl_FragColor = vec4(lambertian*diffuseColor, 1.0);
-		    // only specular
-		    if(mode == 4) gl_FragColor = vec4(specular*specColor, 1.0);
-
 		}
 	</script>
 
@@ -200,7 +239,10 @@
 		var lastTime = 0;
 
 		var occupancies = [];
+		var variances = [];
+		var errors = [];
 		var offsets = [];
+
 		var voxelSize;
 		var xMin;
 		var xMax;
@@ -211,7 +253,7 @@
 
 		var mapVersion;
 		var mapType;
-		var mapTypes = ["Unknown", "CRM", "Log-Odds"];	
+		var mapTypes = ["Unknown", "CRM", "Log-Odds", "GroundTruth"];	
 
 		var lightX = 10.;
 		var lightY = 10.;
@@ -248,7 +290,15 @@
 				ptr += 8;
 				var numParticles = view.getUint32(56, true);
 				ptr += 4;
-				console.log(voxelSize, xMin, xMax, yMin, yMax, zMin, zMax, numParticles);
+				console.log(
+					"voxelSize", voxelSize,
+					"  | xMin", xMin,
+					"  | xMax", xMax,
+					"  | yMin", yMin,
+					"  | yMax", yMax,
+					"  | zMin", zMin,
+					"  | zMax", zMax,
+					"  | numParticles", numParticles);
 				var voxelsX = Math.floor((xMax-xMin)/voxelSize);
 				var voxelsY = Math.floor((yMax-yMin)/voxelSize);
 				var voxelsZ = Math.floor((zMax-zMin)/voxelSize);
@@ -260,28 +310,42 @@
 						{
 							var occupancy = view.getFloat64(ptr, true);
 							ptr += 8;
-							var variance = view.getFloat64(ptr, true);
-							ptr += 8;
-							if (readParticles == 1)
-								ptr += 8 * numParticles
 
-							if (occupancy > 0.5)
+							if (mapType == 3 && occupancy > 0.5)
+								occupancies.push(occupancy * 0.5);
+							else
 							{
-								occupancies.push(occupancy);
-								offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);
+								// maps other than ground truth map
+								var variance = view.getFloat64(ptr, true);
+								ptr += 8;
+								if (readParticles == 1)
+									ptr += 8 * numParticles
+								var error = view.getFloat64(ptr, true);
+								ptr += 8;
+
+
+								if (occupancy > 0.5)
+								{
+									occupancies.push(occupancy);
+									variances.push(variance);
+									errors.push(error);
+								}
 							}
+							if (occupancy > 0.5)
+								offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);						
 						}
 					}
 				}
 
-				document.getElementById("info").innerHTML = '<p>Visualizing '
-				+ String(voxelsX) + "x"
-				+ String(voxelsZ) + "x"
-				+ String(voxelsY) + " "
-				+ mapTypes[mapType] + " map ("
-				+ String(voxelsX*voxelsY*voxelsZ)
-				+ " voxels, version "
-				+ String(mapVersion) + ")</p>";
+				document.getElementById("info").innerHTML = '<p>'
+					+ fileopener.files[0].name + ' - '
+					+ String(voxelsX) + "x"
+					+ String(voxelsZ) + "x"
+					+ String(voxelsY) + " "
+					+ mapTypes[mapType] + " map ("
+					+ String(voxelsX*voxelsY*voxelsZ)
+					+ " voxels, v"
+					+ String(mapVersion) + ")</p>";
 				// setTimeout(function() {
 				// 	var element = document.getElementById("info");
 				// 	element.outerHTML = "";
@@ -302,7 +366,6 @@
 				width: 300
 			});
 
-
 			clock = new THREE.Clock();
 
 			container = document.getElementById( 'container' );
@@ -314,9 +377,7 @@
 			scene.background = new THREE.Color( 0x888888 );
 
 			// geometry
-
-			console.log(occupancies.length);
-			console.log(offsets.length);
+			console.log('occupancies', occupancies.length);
 
 			var instances = 1000000;
 
@@ -340,17 +401,20 @@
 			offsetAttribute = new THREE.InstancedBufferAttribute( new Float32Array( offsets ), 3 );
 			// orientationAttribute = new THREE.InstancedBufferAttribute( new Float32Array( orientations ), 4 ).setDynamic( true );
 			occupancyAttribute = new THREE.InstancedBufferAttribute( new Float32Array( occupancies ), 1 );
+			varianceAttribute = new THREE.InstancedBufferAttribute( new Float32Array( variances ), 1 );
+			errorAttribute = new THREE.InstancedBufferAttribute( new Float32Array( errors ), 1 );
 
 			geometry.addAttribute( 'offset', offsetAttribute );
 			// geometry.addAttribute( 'orientation', orientationAttribute );
 			geometry.addAttribute( 'occupancy', occupancyAttribute );
+			geometry.addAttribute( 'variance', varianceAttribute );
+			geometry.addAttribute( 'error', errorAttribute );
 
 			// var material = new THREE.MeshLambertMaterial({color: 0xff0000 }); //, transparent: true, opacity: 0.5});
 
 			var material = new THREE.RawShaderMaterial( {
 
 				uniforms: {
-					map: { value: new THREE.TextureLoader().load( 'textures/crate.gif' ) },
 					threshold: { value: 0.5 },
 					xMin: { value: xMin },
 					xMax: { value: xMax },
@@ -360,7 +424,9 @@
 					zMax: { value: zMax },
 					lightX: { value: lightX },
 					lightY: { value: lightY },
-					lightZ: { value: lightZ }
+					lightZ: { value: lightZ },
+					mode: { value: 0 },
+					highlightErrors: { value: true }
 				},
 				vertexShader: document.getElementById( 'vertexShader' ).textContent,
 				fragmentShader: document.getElementById( 'fragmentShader' ).textContent
@@ -397,11 +463,21 @@
 
 					element.click();
 				},
-				backgroundColor: "#888888"
+				backgroundColor: "#888888",
+				mode: "occupancy",
+				highlightErrors: true
 			};
 			gui.add(params, 'threshold').min(0.5).max(1.0).step(0.01).onChange( function( threshold  )
 			{
 				mesh.material.uniforms.threshold.value = threshold;
+			});
+			gui.add(params, 'mode', { "occupancy": 0, "variance": 1, "inconsistency": 2 }).onChange( function( mode )
+			{
+				mesh.material.uniforms.mode.value = mode;
+			});
+			gui.add(params, 'highlightErrors').onChange( function( highlightErrors )
+			{
+				mesh.material.uniforms.highlightErrors.value = highlightErrors;
 			});
 			var slicing = gui.addFolder("Slicing");
 			slicing.add(params, 'xMin').min(xMin).max(xMax).step(0.01).onChange( function( v )
