@@ -213,7 +213,7 @@
 			float alpha = 1.0;
 			vec3 diffuseColor = vec3(1.-occ, 1.-occ, 1.-occ);
 			if (mode == 1)
-				diffuseColor = jet(sqrt(var) * 2.).xyz;
+				diffuseColor = jet(sqrt(var) * 2.).xyz; // variance is (mostly) in [0, 0.5]
 			else if (mode == 2)
 				diffuseColor = jet(clamp(abs(err) - 2.*sqrt(var), 0.0, 1.0)).xyz;				
 
@@ -267,7 +267,7 @@
 
 		var mapVersion;
 		var mapType;
-		var mapTypes = ["Unknown", "CRM", "Log-Odds", "GroundTruth"];	
+		var mapTypes = ["Unknown", "CRM", "Log-Odds", "Groundtruth"];	
 
 		var lightX = 10.;
 		var lightY = 10.;
@@ -285,7 +285,20 @@
 				if (mapType > mapTypes.length)
 					mapType = 0;
 				ptr += 4;
-				var readParticles = view.getUint32(ptr, true);
+
+				var meanBytes = 0, stdBytes = 0, errorBytes = 0;
+				var readParticles = 0, numParticles = 0;
+
+				if (mapVersion >= 3) {
+					meanBytes = view.getUint32(ptr, true);
+					ptr += 4;
+					stdBytes = view.getUint32(ptr, true);
+					ptr += 4;
+					errorBytes = view.getUint32(ptr, true);
+					ptr += 4;
+				}
+
+				readParticles = numParticles = view.getUint32(ptr, true);
 				ptr += 4;
 
 				voxelSize = view.getFloat64(ptr, true);
@@ -302,8 +315,11 @@
 				ptr += 8;
 				zMax = view.getFloat64(ptr, true);
 				ptr += 8;
-				var numParticles = view.getUint32(56, true);
-				ptr += 4;
+				if (mapVersion < 3)
+				{
+					numParticles = view.getUint32(ptr, true);
+					ptr += 4;
+				}
 				console.log(
 					"voxelSize", voxelSize,
 					"  | xMin", xMin,
@@ -322,31 +338,85 @@
 					{
 						for (var z = 0; z < voxelsZ; ++z)
 						{
-							var occupancy = view.getFloat64(ptr, true);
-							ptr += 8;
-
-							if (mapType == 3 && occupancy > MIN_OCCUPANCY)
-								occupancies.push(occupancy * 0.5);
-							else if (mapType != 3)
+							if (mapVersion < 3)
 							{
-								// maps other than ground truth map
-								var variance = view.getFloat64(ptr, true);
-								ptr += 8;
-								if (readParticles == 1)
-									ptr += 8 * numParticles
-								var error = view.getFloat64(ptr, true);
+								var occupancy = view.getFloat64(ptr, true);
 								ptr += 8;
 
-
-								if (occupancy > MIN_OCCUPANCY)
+								// ground-truth map
+								if (mapType == 3 && occupancy > MIN_OCCUPANCY)
+									occupancies.push(occupancy * 0.5);
+								else if (mapType != 3)
 								{
-									occupancies.push(occupancy);
-									variances.push(variance);
-									errors.push(error);
+									// maps other than ground truth map
+									var variance = view.getFloat64(ptr, true);
+									ptr += 8;
+									if (readParticles == 1)
+										ptr += 8 * numParticles
+									var error = view.getFloat64(ptr, true);
+									ptr += 8;
+
+									if (occupancy > MIN_OCCUPANCY)
+									{
+										occupancies.push(occupancy);
+										variances.push(variance);
+										errors.push(error);
+									}
 								}
+								if (occupancy > MIN_OCCUPANCY)
+									offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);			
 							}
-							if (occupancy > MIN_OCCUPANCY)
-								offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);						
+							else
+							{
+								var occupancy = 1.;
+								if (meanBytes > 0)
+								{
+									if (meanBytes == 1)
+										occupancy = view.getUint8(ptr, true);
+									else if (meanBytes == 4)
+										occupancy = view.getFloat32(ptr, true);
+									else if (meanBytes == 8)
+										occupancy = view.getFloat64(ptr, true);
+									ptr += meanBytes;
+									if (mapType == 3)
+										occupancy /= 2.;
+									if (occupancy > MIN_OCCUPANCY)
+									{
+										offsets.push(xMin + x*voxelSize, zMin + z*voxelSize, yMin + y*voxelSize);
+										occupancies.push(occupancy);
+									}									
+								}
+								if (stdBytes > 0)
+								{									
+									if (stdBytes == 1)
+										variance = view.getUint8(ptr, true);
+									else if (stdBytes == 4)
+										variance = view.getFloat32(ptr, true);
+									else if (stdBytes == 8)
+										variance = view.getFloat64(ptr, true);
+									variance *= variance;
+									ptr += stdBytes;
+									if (occupancy > MIN_OCCUPANCY)
+									{
+										variances.push(variance);
+									}									
+								}
+								if (errorBytes > 0)
+								{
+									if (errorBytes == 1)
+										error = view.getUint8(ptr, true);
+									else if (errorBytes == 4)
+										error = view.getFloat32(ptr, true);
+									else if (errorBytes == 8)
+										error = view.getFloat64(ptr, true);
+									ptr += errorBytes;
+									if (occupancy > MIN_OCCUPANCY)
+									{
+										errors.push(error);
+									}									
+								}
+								ptr += 8 * numParticles; // a's and b's (2 * 4 bytes per particle)
+							}			
 						}
 					}
 				}
