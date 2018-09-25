@@ -386,6 +386,7 @@
 										occupancies.push(occupancy);
 									}									
 								}
+
 								if (stdBytes > 0)
 								{									
 									if (stdBytes == 1)
@@ -401,6 +402,11 @@
 										variances.push(variance);
 									}									
 								}
+								else if (occupancy > MIN_OCCUPANCY)
+								{
+									variances.push(-1.);
+								}
+
 								if (errorBytes > 0)
 								{
 									if (errorBytes == 1)
@@ -415,6 +421,11 @@
 										errors.push(error);
 									}									
 								}
+								else if (occupancy > MIN_OCCUPANCY)
+								{
+									errors.push(-1.);
+								}
+								
 								ptr += 8 * numParticles; // a's and b's (2 * 4 bytes per particle)
 							}			
 						}
