@@ -118,6 +118,14 @@
 		varying float err;
 
 		varying float thresh;
+		varying vec3 offset_;
+
+		varying float xMin_;
+		varying float xMax_;
+		varying float yMin_;
+		varying float yMax_;
+		varying float zMin_;
+		varying float zMax_;
 
 		void main() {
 			vec3 vPosition = position;
@@ -149,6 +157,14 @@
 			err = error;
 
 			thresh = threshold;
+			offset_ = offset;
+
+			xMin_ = xMin;
+			xMax_ = xMax;
+			yMin_ = yMin;
+			yMax_ = yMax;
+			zMin_ = zMin;
+			zMax_ = zMax;
 		}
 	</script>
 
@@ -167,12 +183,20 @@
 		varying float err;
 
 		varying float thresh;
+		varying vec3 offset_;
 
 		varying vec3 lightPos;
 
 		uniform bool highlightErrors;
 		uniform float errorThreshold;
 		uniform int mode;
+
+		varying float xMin_;
+		varying float xMax_;
+		varying float yMin_;
+		varying float yMax_;
+		varying float zMin_;
+		varying float zMax_;
 
 		// const vec3 ambientColor = vec3(0.3, 0.0, 0.0);
 		// const vec3 specColor = vec3(1.0, 1.0, 1.0);
@@ -215,7 +239,12 @@
 			if (mode == 1)
 				diffuseColor = jet(sqrt(var) * 2.).xyz; // variance is (mostly) in [0, 0.5]
 			else if (mode == 2)
-				diffuseColor = jet(clamp(abs(err) - 2.*sqrt(var), 0.0, 1.0)).xyz;				
+				diffuseColor = jet(clamp(abs(err) - 2.*sqrt(var), 0.0, 1.0)).xyz;
+			else if (mode == 3) {
+				float norm_height = (offset_.y - zMin_) / (zMax_ - zMin_);
+				diffuseColor = jet(norm_height).xyz;
+			}
+
 
 			if (highlightErrors && err > errorThreshold)
 				diffuseColor.x += err;
@@ -242,7 +271,7 @@
 	</script>
 
 	<script>
-		if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+		if (!Detector.webgl) Detector.addGetWebGLMessage();
 
 		var container, stats;
 		var camera, scene, renderer, mesh, controls;
@@ -568,7 +597,7 @@
 			{
 				mesh.material.uniforms.threshold.value = threshold;
 			});
-			gui.add(params, 'mode', { "occupancy": 0, "variance": 1, "inconsistency": 2 }).onChange( function( mode )
+			gui.add(params, 'mode', { "occupancy": 0, "variance": 1, "inconsistency": 2, "height": 3 }).onChange( function( mode )
 			{
 				mesh.material.uniforms.mode.value = mode;
 			});
